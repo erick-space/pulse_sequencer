@@ -1,0 +1,17 @@
+Erickson Ramos
+
+
+10-20-2025
+
+  Install Visual Studio for code editing
+  
+  VSCode is now available as DEB file. You can download it and then run: 
+  https://code.visualstudio.com/Download
+
+  sudo dpkg -i ~/path/to/code_1.XXX.deb
+
+  In case dpkg complains about missing dependencies, run:
+
+  sudo apt -f install
+
+  afterwards to fix the problem.
