@@ -1,0 +1,5 @@
+# ignore vivado design & artifacts
+vivado/*
+*.jou
+*.log
+*.str

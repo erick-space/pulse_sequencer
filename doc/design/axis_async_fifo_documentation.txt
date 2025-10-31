@@ -1,0 +1,126 @@
+AXI4-Stream Asynchronous FIFO (axis_async_fifo)
+===============================================
+
+Overview
+--------
+The `axis_async_fifo` is a simple, fully synthesizable dual-clock FIFO designed
+for AXI4-Stream interfaces. It transfers data safely between independent clock
+domains using Gray-coded pointers and two-flop synchronizers.
+
+Key Features
+-------------
+- Supports AXI4-Stream ready/valid handshake.
+- Handles `TDATA` and `TLAST` signals.
+- Dual-port memory for concurrent read/write.
+- No vendor primitives; fully portable RTL.
+- `DEPTH` must be a power of two.
+- Status flags: FULL, EMPTY, ALMOST_FULL, ALMOST_EMPTY.
+
+Clock Domains
+--------------
+1. **Write (source) domain (s_aclk)**
+   Receives data from upstream via AXI-Stream. Handles `s_tvalid`, `s_tdata`, `s_tlast`,
+   and generates `s_tready` based on FIFO fullness.
+
+2. **Read (sink) domain (m_aclk)**
+   Sends data downstream. Provides `m_tvalid`, `m_tdata`, `m_tlast`, and consumes
+   `m_tready` from the sink.
+
+Pointer Management
+-------------------
+Each domain maintains a binary and Gray-coded pointer:
+
+- `wptr_bin` / `wptr_gray` – Write pointer (source clock domain)
+- `rptr_bin` / `rptr_gray` – Read pointer (sink clock domain)
+
+Pointers are synchronized across domains using two-stage flip-flops:
+
+- `rptr_gray_sync_s`: read pointer synchronized into write domain.
+- `wptr_gray_sync_m`: write pointer synchronized into read domain.
+
+Full/Empty Detection
+--------------------
+The FIFO must safely determine when it is completely **empty** (no data to read)
+or **full** (no space to write). Since the write and read clocks are asynchronous,
+these conditions cannot rely on direct binary pointer comparison. Instead, both
+domains use **Gray-coded pointers** that are safely synchronized before being
+compared.
+
+**1. Empty condition**
+- Evaluated in the **read clock domain** (`m_aclk`).
+- The FIFO is *empty* when both pointers point to the same memory location:
+  empty = (rptr_gray == wptr_gray_sync_m);
+- The synchronized write pointer (`wptr_gray_sync_m`) is a safely delayed version
+  of the true write pointer.
+- When `empty=1`, `m_tvalid=0`, and no new data is available for downstream logic.
+
+**2. Full condition**
+- Evaluated in the **write clock domain** (`s_aclk`).
+- The FIFO is *full* when the next write pointer increment would make it overlap
+  the read pointer, meaning all entries are used.
+- The top two bits of the read pointer’s Gray code are inverted before comparison:
+  full = (wptr_gray_next == {~rptr_gray_sync_s[PTR_W-1:PTR_W-2], rptr_gray_sync_s[PTR_W-3:0]});
+  This MSB inversion distinguishes the case where write and read pointers are
+  aligned after one full wrap (full) from when they are aligned without wrapping
+  (empty).
+
+**Why Gray code is essential**
+- Binary counters can toggle multiple bits at once (e.g., `0111`→`1000`).
+  When sampled asynchronously, this can cause temporary invalid states.
+- Gray code changes only one bit per increment, minimizing metastability risks
+  when crossing clock domains.
+- Hence, both write and read pointers are Gray-coded before synchronization.
+
+**3. Safe operation guarantee**
+- Empty and full never assert simultaneously because of the MSB phase difference.
+- Proper reset initializes both pointers equal (FIFO empty).
+- Pointer arithmetic and Gray-to-binary conversion handle wraparound correctly.
+
+Almost Flags
+-------------
+- **ALMOST FULL**: one slot remaining (`wptr_bin - rptr_bin_sync_s == DEPTH-1`).
+- **ALMOST EMPTY**: one entry available (`wptr_bin_sync_m - rptr_bin == 1`).
+
+Safety Assertions
+------------------
+During simulation (`ASSERT_ON` defined), the following conditions are checked:
+- No write occurs when FULL.
+- No read occurs when EMPTY.
+
+Best Practices
+---------------
+- Keep write and read logic strictly within their domains.
+- Avoid mixed blocking/non-blocking assignments.
+- Use explicit resets per domain.
+- Keep DEPTH as a power of two for proper pointer wrap-around.
+
+Block Diagram Summary
+----------------------
+           WRITE DOMAIN (s_aclk)                   READ DOMAIN (m_aclk)
+   ┌───────────────────────────────┐        ┌──────────────────────────────┐
+   │ AXI Stream Source             │        │ AXI Stream Sink              │
+   │ s_tvalid/s_tdata/s_tlast      │        │ m_tvalid/m_tdata/m_tlast     │
+   │ s_tready                      │        │ m_tready                     │
+   └─────┬─────────────┬───────────┘        └──────────────┬──────────────┘
+         │             │                                  │
+         ▼             │                                  ▼
+   Write Pointer  →  Gray Encode  →  Sync (to read)  ←  Gray Decode ← Read Pointer
+         │                                                 │
+         ▼                                                 ▼
+        Dual-Port Memory (Depth = 2^ADDR_W)  ←→  Shared Data Storage
+         │                                                 │
+         ▼                                                 ▼
+     FULL/ALMOST FULL                              EMPTY/ALMOST EMPTY
+
+File Parameters
+----------------
+- `DATA_W` : Width of TDATA bus (default 64)
+- `DEPTH`  : FIFO depth, power of two (default 512)
+- `ADDR_W` : log2(DEPTH)
+- `PTR_W`  : ADDR_W + 1 for wrap tracking
+
+Author Notes
+-------------
+This module emphasizes clarity and synthesizability over vendor-specific
+optimization. It can be used in any FPGA or ASIC environment requiring safe
+clock domain crossing for streaming data.

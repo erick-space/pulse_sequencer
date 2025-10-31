@@ -116,7 +116,8 @@ module axis_async_fifo #(
   assign rptr_bin_sync_s  = gray2bin(rptr_gray_sync_s);
 
   // Compute next write pointer
-  wire do_write = s_tvalid & s_tready;
+  logic do_write;
+  assign do_write = s_tvalid & s_tready;
   always_comb begin
     wptr_bin_n  = wptr_bin + (do_write ? 1 : 0);
     wptr_gray_n = bin2gray(wptr_bin_n);
@@ -180,7 +181,8 @@ module axis_async_fifo #(
   assign wptr_bin_sync_m  = gray2bin(wptr_gray_sync_m);
 
   // EMPTY when next read pointer equals synchronized write pointer (in Gray)
-  wire do_read = m_tvalid & m_tready;
+  logic do_read;
+  assign do_read = m_tvalid & m_tready;
   always_comb begin
     rptr_bin_n  = rptr_bin + (do_read ? 1 : 0);
     rptr_gray_n = bin2gray(rptr_bin_n);
@@ -208,7 +210,7 @@ module axis_async_fifo #(
   // Read data is presented from current rptr_bin before increment
   logic [PAYLOAD_W-1:0] rd_payload;
   always_ff @(posedge m_aclk) begin
-    rd_payload <= mem[rptr_bin[ADDR_W-1:0]];
+    rd_payload <= mem[rptr_bin_n[ADDR_W-1:0]];
   end
   assign {m_tlast, m_tdata} = rd_payload;
 

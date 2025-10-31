@@ -1,17 +1,12 @@
-`timescale 1ns/1ps
-`define ASSERT_ON
+import axi_stream_pkg::*;
 
-import axi_stream_pkg::*;           // transaction/driver/monitor/sequencer classes
-`include "axi_stream_agent.sv"      // agent class using the pkg
-`include "axi_stream_tb_if.sv"      // AXI-Stream testbench interface
-
-module axis_async_fifo_tb_uvmstyle;
+module axis_async_fifo_tb;
 
   // ---------------------------------------------------------------------------
   // Parameters (match pkg default: 16-bit transaction data)
   // ---------------------------------------------------------------------------
-  localparam int unsigned DATA_W = 16;
-  localparam int unsigned DEPTH  = 512;
+  localparam DATA_W = 16;
+  localparam DEPTH  = 512;
 
   // ---------------------------------------------------------------------------
   // Asynchronous clocks & resets
@@ -30,6 +25,7 @@ module axis_async_fifo_tb_uvmstyle;
     repeat (6)  @(posedge m_aclk);
     m_aresetn = 1;
   end
+
 
   // ---------------------------------------------------------------------------
   // Interfaces (bind to proper clock/reset domains)
@@ -73,7 +69,7 @@ module axis_async_fifo_tb_uvmstyle;
 
   // ---------------------------------------------------------------------------
   // Agent using your package (driver pulls from sequencer mailbox)
-  //  - Constructor signature observed in your file:
+  //  - Constructor signature observed i
   //      function new(virtual axi_stream_tb_if axi_if_master,
   //                   virtual axi_stream_tb_if axi_if_slave);
   // ---------------------------------------------------------------------------
@@ -82,29 +78,21 @@ module axis_async_fifo_tb_uvmstyle;
   initial begin
     // Create and bind agent to interfaces
     agent = new(s_if, m_if);
-    // If your agent has start()/run() methods, call them (optional).
-    // Some implementations auto-spawn driver/monitor threads in new().
-    // Uncomment if your agent provides start():
-    // agent.start();
+
+    // Running agent cause the driver to read transcation from sequencer mailbox
+    // and the monitor will start monitoring the output from the DUV
+    agent.run();
   end
 
   // ---------------------------------------------------------------------------
   // Scoreboard (TB-level): compare expected queue vs DUT output
-  //  We build 'exp_q' from transactions we send via agent.sequencer.send()
+  //  build 'exp_q' from transactions send via agent.sequencer.send()
   //  This keeps the agent driving, while TB checks the sink.
   // ---------------------------------------------------------------------------
   typedef struct packed { logic [DATA_W-1:0] data; logic last; } axis_txn_t;
   axis_txn_t exp_q[$];
+  axis_txn_t exp;
   int sent, rcvd, err;
-
-  // Read-side backpressure
-  initial begin
-    wait (s_aresetn && m_aresetn);
-    forever begin
-      @(posedge m_aclk);
-      m_if.tready <= ($urandom_range(0,100) > 15); // ~85% ready
-    end
-  end
 
   // Monitor sink and compare
   always @(posedge m_aclk) begin
@@ -115,36 +103,71 @@ module axis_async_fifo_tb_uvmstyle;
         $error("[%0t] Unexpected output beat: no expected item queued", $time);
         err++;
       end else begin
-        axis_txn_t exp = exp_q.pop_front();
+        exp = exp_q.pop_front();
         if (exp.data !== m_if.tdata || exp.last !== m_if.tlast) begin
           $display("[%0t] MISMATCH exp.data=%h last=%0d  got.data=%h last=%0d",
                    $time, exp.data, exp.last, m_if.tdata, m_if.tlast);
           err++;
+          $finish;
         end
       end
       rcvd++;
     end
   end
 
+
+// ---------------------------------------------------------------------------
+// Single-owner m_if.tready driver 
+// ---------------------------------------------------------------------------
+typedef enum logic [1:0] {RD_HOLD0, RD_HOLD1, RD_RANDOM} rd_mode_t;
+rd_mode_t rd_mode;
+
+initial begin
+  wait (s_aresetn && m_aresetn);
+  rd_mode = RD_RANDOM; // default random backpressure
+  forever begin
+    @(posedge m_aclk);
+    unique case (rd_mode)
+      RD_HOLD0:  m_if.tready <= 1'b0;
+      RD_HOLD1:  m_if.tready <= 1'b1;
+      RD_RANDOM: m_if.tready <= ($urandom_range(0,100) > 15); //Read-side backpressure, ~85% ready, 
+    endcase
+  end
+end
+
+// test-side helpers (call these in testcases instead of assigning tready)
+task automatic set_ready_hold0();  rd_mode = RD_HOLD0;  endtask
+task automatic set_ready_hold1();  rd_mode = RD_HOLD1;  endtask
+task automatic set_ready_random(); rd_mode = RD_RANDOM; endtask
+
   // ---------------------------------------------------------------------------
-  // Helpers that USE YOUR AGENT'S API
-  //  - We create axi_stream_transaction from the pkg (16-bit data, last)
-  //  - We push into agent.sequencer via its 'send()' task (present in your pkg)
-  //  - We also queue expected beats for the scoreboard
+  // Helpers that USE AGENT'S API
+  //  - Create axi_stream_transaction from the 
+  //  - Push into agent.sequencer via its 'send()' task 
+  //  - queue expected beats for the scoreboard
   // ---------------------------------------------------------------------------
   task automatic enqueue_packet(int beats);
+    
+    axi_stream_transaction tx;
+    logic [DATA_W-1:0] d;
+    logic last;
+    axis_txn_t e; 
+
     for (int i = 0; i < beats; i++) begin
-      logic [DATA_W-1:0] d = $urandom_range(0, (1<<DATA_W)-1);
-      logic last = (i == beats-1);
+      d = $urandom_range(0, (1<<DATA_W)-1);
+      last = (i == beats-1);
 
       // Build your package's transaction
-      axi_stream_transaction tx = new(d, last);
+      tx = new(d, last);
 
-      // Send to the agent's sequencer (defined in your pkg)qA
+      // Send to the agent's sequencer 
+      // Pass transcation to the sequencer through the agent. Agent will put the transaction in a mailbox accessed by the driver
+      // Sequencer class is delcared in a a. SO go to go through agent to get 
+      // This is nonblocking. Meaning this call will not wait for the driver to complete  before moving on. 
       agent.sequencer.send(tx);
 
       // Build expected queue for scoreboard
-      axis_txn_t e; e.data = d; e.last = last;
+      e.data = d; e.last = last;
       exp_q.push_back(e);
       sent++;
     end
@@ -166,18 +189,18 @@ module axis_async_fifo_tb_uvmstyle;
   task automatic tc_fill_drain();
     $display("\n[TC] fill_drain");
     // Hold read off to fill
-    m_if.tready = 0;
+    set_ready_hold0();  // fill
     repeat (DEPTH+8) enqueue_packet(1);
     repeat (20) @(posedge s_aclk);
     // Drain
-    m_if.tready = 1;
+    set_ready_hold1();  // drain
     repeat (200) @(posedge m_aclk);
   endtask
 
   task automatic tc_underflow_check();
     $display("\n[TC] underflow_check");
     wait (exp_q.size() == 0);
-    m_if.tready = 1;
+    set_ready_hold1(); 
     repeat (40) @(posedge m_aclk);
     if (m_if.tvalid) begin
       $error("[%0t] m_tvalid asserted while FIFO empty", $time);
@@ -191,9 +214,12 @@ module axis_async_fifo_tb_uvmstyle;
   initial begin
     wait (s_aresetn && m_aresetn);
 
-    tc_smoke_basic();
-    tc_random_bursts(10);
-    tc_fill_drain();
+    tc_smoke_basic(); wait (exp_q.size() == 0); 
+
+    tc_random_bursts(10); wait (exp_q.size() == 0); 
+
+    tc_fill_drain(); wait (exp_q.size() == 0); 
+
     tc_underflow_check();
 
     // Drain expected
