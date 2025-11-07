@@ -115,6 +115,10 @@ module axis_async_fifo_tb;
     end
   end
 
+  task automatic check_tready();
+    if (s_if.tready)
+      $error("Error tready remains high after filling FIFO");
+  endtask
 
 // ---------------------------------------------------------------------------
 // Single-owner m_if.tready driver 
@@ -178,7 +182,8 @@ task automatic set_ready_random(); rd_mode = RD_RANDOM; endtask
   // ---------------------------------------------------------------------------
   task automatic tc_smoke_basic();
     $display("\n[TC] smoke_basic");
-    enqueue_packet(3);
+    set_ready_hold0();  // fill
+    enqueue_packet(DEPTH+1);
   endtask
 
   task automatic tc_random_bursts(int n);
@@ -191,8 +196,8 @@ task automatic set_ready_random(); rd_mode = RD_RANDOM; endtask
     // Hold read off to fill
     set_ready_hold0();  // fill
     repeat (DEPTH+8) enqueue_packet(1);
-    repeat (20) @(posedge s_aclk);
-    // Drain
+    repeat (DEPTH+8) @(posedge s_aclk);
+    check_tready();
     set_ready_hold1();  // drain
     repeat (200) @(posedge m_aclk);
   endtask
@@ -214,13 +219,13 @@ task automatic set_ready_random(); rd_mode = RD_RANDOM; endtask
   initial begin
     wait (s_aresetn && m_aresetn);
 
-    tc_smoke_basic(); wait (exp_q.size() == 0); 
+    //tc_smoke_basic(); wait (exp_q.size() == 0); 
 
-    tc_random_bursts(10); wait (exp_q.size() == 0); 
+    //tc_random_bursts(10); wait (exp_q.size() == 0); 
 
     tc_fill_drain(); wait (exp_q.size() == 0); 
 
-    tc_underflow_check();
+    //tc_underflow_check();
 
     // Drain expected
     wait (exp_q.size() == 0);

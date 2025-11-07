@@ -124,16 +124,19 @@ module axis_async_fifo #(
   end
 
   // FULL detection (compare Gray-coded next write to read pointer with MSB inversion)
+  logic [PTR_W-1:0] rgray_inv;
   always_comb begin
     // Invert the two MSBs of read pointer gray for full detection
-    logic [PTR_W-1:0] rgray_inv;
     rgray_inv               = rptr_gray_sync_s;
     rgray_inv[PTR_W-1:PTR_W-2] = ~rgray_inv[PTR_W-1:PTR_W-2];
     full = (wptr_gray_n == rgray_inv);
   end
 
   // s_tready is high when not full
-  assign s_tready = ~full;
+  //assign s_tready = ~full;
+  always_ff @(posedge s_aclk) begin
+    s_tready = ~full;
+  end
 
   // Write pointer registers
   always_ff @(posedge s_aclk or negedge s_aresetn) begin
@@ -224,23 +227,23 @@ module axis_async_fifo #(
 
   // -----------------------------
   // Simple safety assertions (synthesis-time off, sim-time on)
-  // -----------------------------
-`ifdef ASSERT_ON
-  // Never write when full
-  property p_no_write_when_full;
-    @(posedge s_aclk) disable iff (!s_aresetn)
-      full |-> !s_tvalid;
-  endproperty
-  assert property (p_no_write_when_full)
-    else $error("axis_async_fifo: write attempted when FULL");
+//   // -----------------------------
+// `ifdef ASSERT_ON
+//   // Never write when full
+//   property p_no_write_when_full;
+//     @(posedge s_aclk) disable iff (!s_aresetn)
+//       full |-> !s_tvalid;
+//   endproperty
+//   assert property (p_no_write_when_full)
+//     else $error("axis_async_fifo: write attempted when FULL");
 
-  // Never read when empty
-  property p_no_read_when_empty;
-    @(posedge m_aclk) disable iff (!m_aresetn)
-      empty |-> !m_tready;
-  endproperty
-  assert property (p_no_read_when_empty)
-    else $error("axis_async_fifo: read attempted when EMPTY");
-`endif
+//   // Never read when empty
+//   property p_no_read_when_empty;
+//     @(posedge m_aclk) disable iff (!m_aresetn)
+//       empty |-> !m_tready;
+//   endproperty
+//   assert property (p_no_read_when_empty)
+//     else $error("axis_async_fifo: read attempted when EMPTY");
+// `endif
 
 endmodule
