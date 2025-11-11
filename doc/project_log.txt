@@ -2,16 +2,42 @@ Erickson Ramos
 
 
 10-20-2025
+-----------
 
   Install Visual Studio for code editing
   
-  VSCode is now available as DEB file. You can download it and then run: 
-  https://code.visualstudio.com/Download
+    VSCode is now available as DEB file. You can download it and then run: 
+    https://code.visualstudio.com/Download
 
-  sudo dpkg -i ~/path/to/code_1.XXX.deb
+    sudo dpkg -i ~/path/to/code_1.XXX.deb
 
-  In case dpkg complains about missing dependencies, run:
+    In case dpkg complains about missing dependencies, run:
 
-  sudo apt -f install
+    sudo apt -f install
 
-  afterwards to fix the problem.
+    afterwards to fix the problem.
+    
+  
+    sudo vmhgfs-fuse .host:/vm_sf /home/er/vm_sf/ allow_other -o uid=1000
+
+
+11-09-2025
+-----------
+
+  Changes Made to Get the Async FIFO HDL Working
+
+    1. Use of Unregistered Read Pointer for Memory Access
+      - The read pointer was previously registered before being used to index the RAM.
+      - Because the RAM has a one-clock-cycle read latency, the output data becomes valid 
+        one cycle after the read pointer updates.
+      - This delay caused misalignment between m_tdata and m_tvalid pulses, 
+        resulting in incoherent output behavior.
+      - The issue was resolved by using the unregistered read pointer directly for RAM addressing, 
+        ensuring proper synchronization between data and valid signals.
+
+    2. Use of logic Instead of reg and wire
+      - All signals and registers were redefined using the logic type for better SystemVerilog 
+        compatibility and to simplify synthesis and simulation.
+
+    3. One-Cycle Delay on s_tready
+
